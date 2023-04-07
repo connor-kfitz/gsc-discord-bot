@@ -1,6 +1,8 @@
 import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
 import { Player, useMasterPlayer } from 'discord-player';
 import { config } from 'dotenv'
+import * as Constants from './constants.js';
+import * as Helpers from './helpers.js';
 
 config();
 
@@ -20,6 +22,7 @@ const guild_id = process.env.GUILD_ID;
 
 const rest = new REST({ version: '10' }).setToken(token)
 const player = new Player(client);
+
 var firstPlay = true;
 
 main();
@@ -27,30 +30,31 @@ main();
 client.login(token)
 
 client.on('ready', async () => {
-    console.log('Bot has logged in.')
+    console.log(Constants.botReplies.ready)
 })
 
 player.events.on('playerStart', (queue, track) => {
-    queue.metadata.channel.send(`Started playing ${track.title}!`);
+    queue.metadata.channel.send(Constants.playerReplies.playerStart[0] + track.title + Constants.playerReplies.playerStart[1]);
 });
 
 player.events.on('audioTrackAdd', (queue, track) => {
     if (!firstPlay) {
-        queue.metadata.channel.send(`Added ${track.title} to the queue!`);
+        queue.metadata.channel.send(Constants.playerReplies.addTrack[0] + track.title + Constants.playerReplies.addTrack[1]);
     }
 });
 
 player.events.on('emptyQueue', (queue, track) => {
     firstPlay = true;
+    queue.metadata.channel.send(Constants.playerReplies.emptyQueue);
 });
 
 player.on("error", (queue, error) => {
-    console.log('Player Error');
+    console.log(Constants.playerReplies.error);
 });
 
 client.on('interactionCreate', async (interaction) => {
 
-    const player = useMasterPlayer(); // Get the player instance that we created earlier
+    const player = useMasterPlayer();
     const userId = interaction.user.id;
     const guildId = interaction.member.guild.id;
     const queue = player.nodes.get(guildId);
@@ -59,14 +63,14 @@ client.on('interactionCreate', async (interaction) => {
         
         const channel = getPlaybackChannel(userId, guildId);
 
-        if (!channel) return interaction.reply('You are not connected to a voice channel!'); // make sure we have a voice channel
-        const search = interaction.options.getString('search', true); // we need input/search to play
+        if (!channel) return interaction.reply(Constants.playerReplies.connectionFailed);
+        const search = interaction.options.getString('search', true);
     
         await interaction.deferReply();
         const searchResult = await player.search(search, { requestedBy: interaction.user });
     
         if (!searchResult.hasTracks()) {
-            await interaction.editReply(`We found no tracks for ${search}!`);
+            await interaction.editReply(Constants.playerReplies.search[0] + search + Constants.playerReplies.search[1]);
             return;
         } else {
             try {
@@ -78,78 +82,67 @@ client.on('interactionCreate', async (interaction) => {
                         requestedBy: interaction.user,
                     }
                 });
-                await interaction.editReply(`Loading your track`);
+                await interaction.editReply(Constants.playerReplies.loading);
                 firstPlay = false;
             } catch (e) {
-                return interaction.followUp(`Something went wrong: ${e}`);
+                return interaction.followUp(Constants.playerReplies.badRequest[0] + e + Constants.playerReplies.badRequest[1]);
             }
         }
     } else if (interaction.commandName === 'queue') {
 
-        const queue = player.nodes.get(guildId);
-        const trackList = queue.tracks.data.map((item => item.title));
-        var trackListString = '';
+        if (queue) {
+            const trackList = queue.tracks.data.map((item => item.title));
+            var trackListString = '';
+    
+            trackList.map((tracks, index) => {
+                trackListString += index + 1 + '. ' + tracks + ' \n'
+            })
 
-        trackList.map((tracks, index) => {
-            trackListString += index + 1 + '. ' + tracks + ' \n'
-        })
-        
-        if (trackListString) {
             await interaction.reply(trackListString)
         } else {
-            await interaction.reply('No tracks are in the queue');
+            await interaction.reply(Constants.playerReplies.emptyQueue);
+
         }
     
     } else if (interaction.commandName === 'skip') {
 
-        const queue = player.nodes.get(guildId);       
-        queue.node.skip();
-
+        if (queue) {
+            queue.node.skip();
+            await interaction.reply(Constants.playerReplies.skip);
+        } else {
+            await interaction.reply(Constants.playerReplies.emptyQueue);
+        }
+        
     } else if (interaction.commandName === 'pause') {
 
-        const queue = player.nodes.get(guildId);       
-        queue.node.pause();
+        if (queue) {
+            queue.node.pause();
+            await interaction.reply(Constants.playerReplies.pause);
+        } else {
+            await interaction.reply(Constants.playerReplies.emptyQueue);
+        }
 
     } else if (interaction.commandName === 'start') {
 
-        const queue = player.nodes.get(guildId);       
-        queue.node.resume();
-    }
+        if (queue) {
+            queue.node.resume();
+            await interaction.reply(Constants.playerReplies.start);
+        } else {
+            await interaction.reply(Constants.playerReplies.emptyQueue);
+        }     
+    } else if (interaction.commandName === 'commands') {
 
+        await interaction.reply(returnCommandList());
+          
+    }
 });
 
 async function main() {
 
-    const commands = [
-        {
-            name: "play",
-            description: "Plays a song from youtube",
-            options: [
-                {
-                    name: "search",
-                    type: 3,
-                    description: "The song you want to play",
-                    required: true
-                }
-            ]
-        },
-        {
-            name: "skip",
-            description: "Skip to the current song"
-        },
-        {
-            name: "queue",
-            description: "See the queue"
-        },
-        {
-            name: "stop",
-            description: "Stop the player"
-        },
-    ];
+    const commands = Constants.commands;
 
     try {
-
-        console.log('Started refreshing application (/) commands.');
+        console.log(Constants.botReplies.initSlashCommands);
 
         await rest.put(Routes.applicationGuildCommands(client_id, guild_id), {
             body: commands
@@ -180,5 +173,16 @@ function getPlaybackChannel(userId, guildId) {
         })
     })
 
-    return channelId; 
+    return channelId;
+}
+
+function returnCommandList() {
+
+    var commandList = '';
+
+    Constants.commands.map((command, index) => {
+        commandList += "**" + (index + 1) + '. ' + Helpers.capitalizeFirstLetter(command.name) + '**: ' + command.description +' \n'
+    })
+
+    return commandList;
 }
