@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
 import { Player, useMasterPlayer } from 'discord-player';
 import { config } from 'dotenv'
+import { SoundCloudExtractor } from '@discord-player/extractor';
 import * as Constants from './constants.js';
 import * as Helpers from './helpers.js';
 
@@ -22,6 +23,8 @@ const guild_id = process.env.GUILD_ID;
 
 const rest = new REST({ version: '10' }).setToken(token)
 const player = new Player(client);
+player.extractors.register(SoundCloudExtractor);
+
 
 var firstPlay = true;
 
@@ -67,7 +70,10 @@ client.on('interactionCreate', async (interaction) => {
         const search = interaction.options.getString('search', true);
     
         await interaction.deferReply();
-        const searchResult = await player.search(search, { requestedBy: interaction.user });
+        const searchResult = await player.search(search, { 
+                                                            requestedBy: interaction.user,
+                                                            queryType: SoundCloudExtractor
+                                                         });
     
         if (!searchResult.hasTracks()) {
             await interaction.editReply(Constants.playerReplies.search[0] + search + Constants.playerReplies.search[1]);
@@ -76,10 +82,7 @@ client.on('interactionCreate', async (interaction) => {
             try {
                 await player.play(channel, searchResult, {
                     nodeOptions: {
-                        metadata: interaction,
-                        channel: interaction.channel,
-                        client: interaction.guild.members.me,
-                        requestedBy: interaction.user,
+                        metadata: interaction
                     }
                 });
                 await interaction.editReply(Constants.playerReplies.loading);
