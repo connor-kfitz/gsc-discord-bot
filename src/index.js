@@ -20,6 +20,7 @@ const guild_id = process.env.GUILD_ID;
 
 const rest = new REST({ version: '10' }).setToken(token)
 const player = new Player(client);
+var firstPlay = true;
 
 main();
 
@@ -30,50 +31,91 @@ client.on('ready', async () => {
 })
 
 player.events.on('playerStart', (queue, track) => {
-    // we will later define queue.metadata object while creating the queue
-    queue.metadata.channel.send(`Started playing **${track.title}**!`);
+    queue.metadata.channel.send(`Started playing ${track.title}!`);
+});
+
+player.events.on('audioTrackAdd', (queue, track) => {
+    if (!firstPlay) {
+        queue.metadata.channel.send(`Added ${track.title} to the queue!`);
+    }
+});
+
+player.events.on('emptyQueue', (queue, track) => {
+    firstPlay = true;
 });
 
 player.on("error", (queue, error) => {
-    // console.log(`[${queue.guild.name}] Error emitted from the queue: ${error.message}`);
     console.log('Player Error');
 });
 
 client.on('interactionCreate', async (interaction) => {
 
     const player = useMasterPlayer(); // Get the player instance that we created earlier
-
     const userId = interaction.user.id;
     const guildId = interaction.member.guild.id;
+    const queue = player.nodes.get(guildId);
 
-    console.log("Guild ID Interaction ", userId);
+    if (interaction.commandName === "play") {
+        
+        const channel = getPlaybackChannel(userId, guildId);
 
-    const channel = getPlaybackChannel(userId, guildId);
-
-    if (!channel) return interaction.reply('You are not connected to a voice channel!'); // make sure we have a voice channel
-    const query = interaction.options.getString('query', true); // we need input/query to play
- 
-    // let's defer the interaction as things can take time to process
-    await interaction.deferReply();
-    const searchResult = await player.search(query, { requestedBy: interaction.user });
- 
-    if (!searchResult.hasTracks()) {
-        // If player didn't find any songs for this query
-        await interaction.editReply(`We found no tracks for ${query}!`);
-        return;
-    } else {
-        try {
-            await player.play(channel, searchResult, {
-                nodeOptions: {
-                    metadata: interaction // we can access this metadata object using queue.metadata later on
-                }
-            });
-            await interaction.editReply(`Loading your track`);
-        } catch (e) {
-            // let's return error if something failed
-            return interaction.followUp(`Something went wrong: ${e}`);
+        if (!channel) return interaction.reply('You are not connected to a voice channel!'); // make sure we have a voice channel
+        const search = interaction.options.getString('search', true); // we need input/search to play
+    
+        await interaction.deferReply();
+        const searchResult = await player.search(search, { requestedBy: interaction.user });
+    
+        if (!searchResult.hasTracks()) {
+            await interaction.editReply(`We found no tracks for ${search}!`);
+            return;
+        } else {
+            try {
+                await player.play(channel, searchResult, {
+                    nodeOptions: {
+                        metadata: interaction,
+                        channel: interaction.channel,
+                        client: interaction.guild.members.me,
+                        requestedBy: interaction.user,
+                    }
+                });
+                await interaction.editReply(`Loading your track`);
+                firstPlay = false;
+            } catch (e) {
+                return interaction.followUp(`Something went wrong: ${e}`);
+            }
         }
+    } else if (interaction.commandName === 'queue') {
+
+        const queue = player.nodes.get(guildId);
+        const trackList = queue.tracks.data.map((item => item.title));
+        var trackListString = '';
+
+        trackList.map((tracks, index) => {
+            trackListString += index + 1 + '. ' + tracks + ' \n'
+        })
+        
+        if (trackListString) {
+            await interaction.reply(trackListString)
+        } else {
+            await interaction.reply('No tracks are in the queue');
+        }
+    
+    } else if (interaction.commandName === 'skip') {
+
+        const queue = player.nodes.get(guildId);       
+        queue.node.skip();
+
+    } else if (interaction.commandName === 'pause') {
+
+        const queue = player.nodes.get(guildId);       
+        queue.node.pause();
+
+    } else if (interaction.commandName === 'start') {
+
+        const queue = player.nodes.get(guildId);       
+        queue.node.resume();
     }
+
 });
 
 async function main() {
@@ -84,7 +126,7 @@ async function main() {
             description: "Plays a song from youtube",
             options: [
                 {
-                    name: "query",
+                    name: "search",
                     type: 3,
                     description: "The song you want to play",
                     required: true
